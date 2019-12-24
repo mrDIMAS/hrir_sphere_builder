@@ -1,0 +1,12 @@
+*.pdb
+*.ilk
+*.db
+*.user
+*.suo
+*.obj
+*.iobj
+*.ipdb
+/vcproj/.vs
+/vcproj/Debug
+/vcproj/Release
+/vcproj/x64
