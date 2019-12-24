@@ -1,10 +1,10 @@
-# HRTF Builder
+# HRIR Sphere Builder
 
 Special tool to make HRIR sphere mesh from IRCAM http://recherche.ircam.fr/equipes/salles/listen/download.html base.
 
 ## Usage
 
-`hrtf_sphere_builder <directory_path>`
+`hrir_sphere_builder <directory_path>`
 
 Output file will have this name: `directory_name.bin` and will be placed in parent directory of `directory_path`.
 
