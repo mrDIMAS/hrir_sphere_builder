@@ -15,44 +15,10 @@
 #define CONVHULL_3D_ENABLE
 #include "convexhull_3d/convhull_3d.h"
 
+#include "AudioFile/AudioFile.h"
+
 using namespace std;
 namespace fs = std::experimental::filesystem::v1;
-
-typedef struct WavHeader {
-	int8_t chunk_id[4];
-	uint32_t chunk_size;
-	int8_t format[4];
-	int8_t fmt_chunk_id[4];
-	uint32_t fmt_chunk_size;
-	uint16_t audio_format;
-	uint16_t num_channels;
-	uint32_t sample_rate;
-	uint32_t byte_rate;
-	uint16_t block_align;
-	uint16_t bits_per_sample;
-	int8_t data_chunk_id[4];
-	uint32_t data_chunk_size;
-} WavHeader;
-
-template<typename T>
-void ReadExact(ifstream& stream, T& v)
-{
-	const auto len = sizeof(T);
-	stream.read(reinterpret_cast<char*>(&v), len);
-	if (stream.eof()) {
-		throw runtime_error("invalid wav");
-	}
-}
-
-template<typename T>
-void ReadExact(ifstream& stream, vector<T>& vec)
-{
-	const auto size = vec.size() * sizeof(T);
-	stream.read(reinterpret_cast<char*>(vec.data()), size);
-	if (stream.eof()) {
-		throw runtime_error("invalid wav");
-	}
-}
 
 template<typename T>
 void WriteExact(ofstream& stream, const T& v)
@@ -65,70 +31,6 @@ void WriteExact(ofstream& stream, const vector<T>& v)
 {
 	stream.write(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(T));
 }
-
-class SoundBuffer {
-public:
-	SoundBuffer(const string& file_name)
-	{
-		auto f = ifstream(file_name, ios::binary);
-
-		if (!f.is_open()) {
-			throw runtime_error("unable to open" + file_name);
-		}
-
-		WavHeader wav;
-
-		ReadExact(f, wav.chunk_id);
-		ReadExact(f, wav.chunk_size);
-		ReadExact(f, wav.format);
-		ReadExact(f, wav.fmt_chunk_id);
-		ReadExact(f, wav.fmt_chunk_size);
-		ReadExact(f, wav.audio_format);
-		ReadExact(f, wav.num_channels);
-		ReadExact(f, wav.sample_rate);
-		ReadExact(f, wav.byte_rate);
-		ReadExact(f, wav.block_align);
-		ReadExact(f, wav.bits_per_sample);
-		ReadExact(f, wav.data_chunk_id);
-		ReadExact(f, wav.data_chunk_size);
-
-		if (strncmp((char*)wav.chunk_id, "RIFF", sizeof(wav.chunk_id)) != 0) {
-			throw runtime_error("wav: invalid chunk id");
-		}
-
-		if (strncmp((char*)wav.data_chunk_id, "data", sizeof(wav.data_chunk_id)) != 0) {
-			throw runtime_error("invalid wav");
-		}
-
-		if (strncmp((char*)wav.fmt_chunk_id, "fmt ", sizeof(wav.fmt_chunk_id)) != 0) {
-			throw runtime_error("wav: invalid fmt chunk id");
-		}
-
-		if (strncmp((char*)wav.format, "WAVE", sizeof(wav.format)) != 0) {
-			throw runtime_error("wav: invalid format");
-		}
-
-		if (wav.audio_format != 1) {
-			throw runtime_error("wav: compressed formats not supported!");
-		}
-
-		if (wav.num_channels != 2) {
-			throw runtime_error("hrtf must have two channels!");
-		}
-
-		m_Data.resize(wav.data_chunk_size);
-		ReadExact(f, m_Data);
-
-		m_SampleSize = wav.bits_per_sample / 8;
-		m_SampleRate = wav.sample_rate;
-	}
-
-	~SoundBuffer() = default;
-
-	vector<char> m_Data;
-	uint16_t m_SampleSize;
-	uint32_t m_SampleRate;
-};
 
 struct Vec3 {
 	float x;
@@ -282,45 +184,6 @@ Vec3 ParseFileName(const string& fileName)
 	return SphericalToCartesian(ToRadians(azimuth), ToRadians(elevation), 1.0);
 }
 
-struct SamplePair {
-	float m_Left;
-	float m_Right;
-};
-
-
-float Read24BitSample(const char* ptr)
-{
-	const auto a = static_cast<int>(*ptr);
-	const auto b = static_cast<int>(*(ptr + 1));
-	const auto c = static_cast<int>(*(ptr + 2));
-	return static_cast<float>((a << 8) | (b << 16) | (c << 24)) / 2147483648.0f;
-}
-
-SamplePair ReadSamplePair(const char* ptr, uint16_t sampleSize)
-{
-	SamplePair pair;
-	if (sampleSize == 1) {
-		const auto scale = 1.0f / static_cast<float>(std::numeric_limits<int8_t>::max());
-		pair.m_Left = static_cast<float>(*ptr) * scale;
-		pair.m_Right = static_cast<float>(*(ptr + 1)) * scale;
-	} else if (sampleSize == 2) {
-		const auto scale = 1.0f / static_cast<float>(std::numeric_limits<int16_t>::max());
-		const auto bit16 = reinterpret_cast<const short*>(ptr);
-		pair.m_Left = static_cast<float>(*bit16) * scale;
-		pair.m_Right = static_cast<float>(*(bit16 + 1)) * scale;
-	} else if (sampleSize == 3) {
-		pair.m_Left = Read24BitSample(ptr);
-		pair.m_Right = Read24BitSample(ptr + 3);
-	} else if (sampleSize == 4) {
-		const auto flt = reinterpret_cast<const float*>(ptr);
-		pair.m_Left = *flt;
-		pair.m_Right = *(flt + 1);
-	} else {
-		throw runtime_error("sample size unsupported");
-	}
-	return pair;
-}
-
 int main(int argc, char** arcv) try {
 	if (argc != 2) {
 		throw runtime_error("no path specified");
@@ -340,20 +203,18 @@ int main(int argc, char** arcv) try {
 		cout << "\rworking on " << path << flush;
 
 		const auto position = ParseFileName(path);
-		const auto buffer = SoundBuffer(path);
 
-		vector<float> leftHRIR, rightHRIR;
+		AudioFile<float> buffer; 
 
-		const char* ptr = buffer.m_Data.data();
-		const char* end = ptr + buffer.m_Data.size();
-		while (ptr != end) {
-			const auto pair = ReadSamplePair(ptr, buffer.m_SampleSize);
-			leftHRIR.push_back(pair.m_Left);
-			rightHRIR.push_back(pair.m_Right);
-			ptr += 2 * buffer.m_SampleSize;
+		if (!buffer.load(path)) {
+			throw runtime_error("invalid wav");
 		}
 
-		sphere.AddVertex(HrtfVertex(buffer.m_SampleRate, position, std::move(leftHRIR), std::move(rightHRIR)));
+		if (buffer.getNumChannels() != 2) {
+			throw runtime_error("hrir must be two channel wav file");
+		}
+		
+		sphere.AddVertex(HrtfVertex(buffer.getSampleRate(), position, std::move(buffer.samples[0]), std::move(buffer.samples[1])));
 	}
 
 	sphere.Validate();
