@@ -21,7 +21,7 @@ namespace fs = std::experimental::filesystem::v1;
 typedef struct WavHeader {
 	int8_t chunk_id[4];
 	uint32_t chunk_size;
-	int8_t format[4];	
+	int8_t format[4];
 	int8_t fmt_chunk_id[4];
 	uint32_t fmt_chunk_size;
 	uint16_t audio_format;
@@ -29,7 +29,7 @@ typedef struct WavHeader {
 	uint32_t sample_rate;
 	uint32_t byte_rate;
 	uint16_t block_align;
-	uint16_t bits_per_sample;	
+	uint16_t bits_per_sample;
 	int8_t data_chunk_id[4];
 	uint32_t data_chunk_size;
 } WavHeader;
@@ -283,34 +283,42 @@ Vec3 ParseFileName(const string& fileName)
 }
 
 struct SamplePair {
-	int m_Left;
-	int m_Right;
+	float m_Left;
+	float m_Right;
 };
+
+
+float Read24BitSample(const char* ptr)
+{
+	const auto a = static_cast<int>(*ptr);
+	const auto b = static_cast<int>(*(ptr + 1));
+	const auto c = static_cast<int>(*(ptr + 2));
+	return static_cast<float>((a << 8) | (b << 16) | (c << 24)) / 2147483648.0f;
+}
 
 SamplePair ReadSamplePair(const char* ptr, uint16_t sampleSize)
 {
 	SamplePair pair;
 	if (sampleSize == 1) {
-		pair.m_Left = *ptr;
-		pair.m_Right = *(ptr + 1);
+		const auto scale = 1.0f / static_cast<float>(std::numeric_limits<int8_t>::max());
+		pair.m_Left = static_cast<float>(*ptr) * scale;
+		pair.m_Right = static_cast<float>(*(ptr + 1)) * scale;
 	} else if (sampleSize == 2) {
+		const auto scale = 1.0f / static_cast<float>(std::numeric_limits<int16_t>::max());
 		const auto bit16 = reinterpret_cast<const short*>(ptr);
-		pair.m_Left = *bit16;
-		pair.m_Right = *(bit16 + 1);
+		pair.m_Left = static_cast<float>(*bit16) * scale;
+		pair.m_Right = static_cast<float>(*(bit16 + 1)) * scale;
+	} else if (sampleSize == 3) {
+		pair.m_Left = Read24BitSample(ptr);
+		pair.m_Right = Read24BitSample(ptr + 3);
+	} else if (sampleSize == 4) {
+		const auto flt = reinterpret_cast<const float*>(ptr);
+		pair.m_Left = *flt;
+		pair.m_Right = *(flt + 1);
 	} else {
 		throw runtime_error("sample size unsupported");
 	}
 	return pair;
-}
-
-int SampleLimit(uint16_t sampleSize)
-{
-	if (sampleSize == 1) {
-		return std::numeric_limits<int8_t>::max();
-	} else if (sampleSize == 2) {
-		return std::numeric_limits<int16_t>::max();
-	}
-	throw runtime_error("sample size unsupported");
 }
 
 int main(int argc, char** arcv) try {
@@ -329,12 +337,10 @@ int main(int argc, char** arcv) try {
 	for (const auto& entry : fs::directory_iterator(folder)) {
 		const auto path = entry.path().u8string();
 
-		cout << "working on " << path << endl;
+		cout << "\rworking on " << path << flush;
 
 		const auto position = ParseFileName(path);
 		const auto buffer = SoundBuffer(path);
-
-		const auto sampleLimit = static_cast<float>(SampleLimit(buffer.m_SampleSize));
 
 		vector<float> leftHRIR, rightHRIR;
 
@@ -342,8 +348,8 @@ int main(int argc, char** arcv) try {
 		const char* end = ptr + buffer.m_Data.size();
 		while (ptr != end) {
 			const auto pair = ReadSamplePair(ptr, buffer.m_SampleSize);
-			leftHRIR.push_back(static_cast<float>(pair.m_Left) / sampleLimit);
-			rightHRIR.push_back(static_cast<float>(pair.m_Right) / sampleLimit);
+			leftHRIR.push_back(pair.m_Left);
+			rightHRIR.push_back(pair.m_Right);
 			ptr += 2 * buffer.m_SampleSize;
 		}
 
@@ -353,13 +359,13 @@ int main(int argc, char** arcv) try {
 	sphere.Validate();
 	sphere.Triangulate();
 
-	const auto folderPath = fs::path(folder);	
+	const auto folderPath = fs::path(folder);
 	const auto outputPath = folderPath.parent_path().append(folderPath.filename().replace_extension(".bin"));
 
 	ofstream output(outputPath, ios::binary);
 	sphere.Save(output);
 
-	cout << "done. saved into " << outputPath << endl;
+	cout << "\ndone. saved into " << outputPath << endl;
 
 } catch (exception& e) {
 	cerr << e.what();

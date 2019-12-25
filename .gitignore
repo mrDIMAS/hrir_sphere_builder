@@ -6,6 +6,8 @@
 *.obj
 *.iobj
 *.ipdb
+*.log
+*.tlog
 /vcproj/.vs
 /vcproj/Debug
 /vcproj/Release
