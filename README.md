@@ -2,6 +2,10 @@
 
 Special tool to make HRIR sphere mesh from IRCAM http://recherche.ircam.fr/equipes/salles/listen/download.html base.
 
+## Pre-built database
+
+I already converted all IRCAM database entries, you can find them in `hrtf_base/IRCAM` - just pick any of `*.bin` files. Description of each can be found in link up above. 
+
 ## Usage
 
 `hrir_sphere_builder <directory_path>`
