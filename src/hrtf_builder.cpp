@@ -10,7 +10,8 @@
 
 #include <iostream>
 #include <fstream>
-#include <experimental/filesystem>
+#include <filesystem>
+#include <set>
 
 #define CONVHULL_3D_ENABLE
 #include "convexhull_3d/convhull_3d.h"
@@ -18,7 +19,7 @@
 #include "AudioFile/AudioFile.h"
 
 using namespace std;
-namespace fs = std::experimental::filesystem::v1;
+namespace fs = std::filesystem;
 
 template<typename T>
 void WriteExact(ofstream& stream, const T& v)
@@ -154,9 +155,9 @@ private:
 Vec3 SphericalToCartesian(float azimuth, float elevation, float radius)
 {
 	// Translates spherical to cartesian, where Y - up, Z - forward, X - right
-	const float x = radius * sin(elevation) * sin(azimuth);
-	const float y = radius * cos(elevation);
-	const float z = -radius * sin(elevation) * cos(azimuth);
+	const float x = radius * cos(elevation) * cos(azimuth);
+	const float y = radius * sin(elevation);
+	const float z = -radius * cos(elevation) * sin(azimuth);
 	return Vec3(x, y, z);
 }
 
@@ -173,13 +174,20 @@ Vec3 ParseFileName(const string& fileName)
 	if (azimuth_location == string::npos) {
 		throw runtime_error("invalid file name");
 	}
-	const auto azimuth = static_cast<float>(atof(fileName.substr(azimuth_location + 2, 3).c_str()));
+	// azimuth in degrees 3 digits, we need 90 deg offset so that the angle is relative to z-axis,
+	// - from 000 to 180 for source on your left,
+	// - from 180 to 359 for source on your right
+	const auto azimuth = 90.0f + static_cast<float>(atof(fileName.substr(azimuth_location + 2, 3).c_str()));
 
+	// elevation in degrees, modulo 360, 3 digits, 
+	// - from 315 to 345 for source below your head, 
+	// - 0 for source in front of your head, 
+	// - from 015 to 090 for source above your head
 	const auto elevation_location = fileName.find("_P");
 	if (elevation_location == string::npos) {
 		throw runtime_error("invalid file name");
 	}
-	const auto elevation = 90.0f - static_cast<float>(atof(fileName.substr(elevation_location + 2, 3).c_str()));
+	const auto elevation = static_cast<float>(atof(fileName.substr(elevation_location + 2, 3).c_str()));
 
 	return SphericalToCartesian(ToRadians(azimuth), ToRadians(elevation), 1.0);
 }
@@ -196,9 +204,14 @@ int main(int argc, char** arcv) try {
 	}
 
 	HrtfSphere sphere;
+	set<fs::path> sorted_by_name;
 
 	for (const auto& entry : fs::directory_iterator(folder)) {
-		const auto path = entry.path().u8string();
+		sorted_by_name.insert(entry.path());
+	}
+
+	for (const auto& entry : sorted_by_name) {
+		const auto path = entry.u8string();
 
 		cout << "\rworking on " << path << flush;
 
@@ -221,7 +234,7 @@ int main(int argc, char** arcv) try {
 	sphere.Triangulate();
 
 	const auto folderPath = fs::path(folder);
-	const auto outputPath = folderPath.parent_path().append(folderPath.filename().replace_extension(".bin"));
+	const auto outputPath = folderPath.parent_path() / (folderPath.filename().replace_extension(".bin"));
 
 	ofstream output(outputPath, ios::binary);
 	sphere.Save(output);

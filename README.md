@@ -57,4 +57,4 @@ Finally goes `vertex_count` vertices, each vertex has this format:
 
 ## How to build the tool?
 
-`g++ -o hrir_sphere_builder hrir_sphere_builder.cpp`
+`g++ -std=c++17 -o hrir_sphere_builder ./src/hrtf_builder.cpp`
